@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Document</title>
+    
+    <!-- CSS et JS KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        {{CUSTOM_CSS}}
+        {{PYGMENTS_CSS}}
+    </style>
+</head>
+<body>
+    <div id="content">
+        {{CONTENT}}
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const content = document.getElementById("content");
+            
+            // A. Nettoyage automatique des $$ mal placés au milieu du texte
+            if (content) {
+                content.querySelectorAll("p, li, td, h1, h2, h3, h4").forEach(el => {
+                    // Remplace les $$ inline par des séparateurs propres \( \)
+                    el.innerHTML = el.innerHTML.replace(/\$\$(.*?)\$\$/g, '\\($1\\)');
+                });
+            }
+
+            // B. Rendu des formules KaTeX
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: "$$", right: "$$", display: true},
+                    {left: "$", right: "$", display: false},
+                    {left: "\\(", right: "\\)", display: false},
+                    {left: "\\[", right: "\\]", display: true}
+                ],
+                throwOnError: false
+            });
+
+            // C. Regroupement intelligent anti-traits orphelins
+            const headings = Array.from(document.querySelectorAll("h2, h3"));
+            headings.forEach(h => {
+                if (h.parentElement.classList.contains("section-block")) return;
+
+                let startNode = h;
+                if (h.previousElementSibling && h.previousElementSibling.tagName === "HR") {
+                    startNode = h.previousElementSibling;
+                }
+
+                const section = document.createElement("div");
+                section.className = "section-block";
+                startNode.parentNode.insertBefore(section, startNode);
+
+                let curr = startNode;
+                while (curr) {
+                    let next = curr.nextElementSibling;
+                    section.appendChild(curr);
+
+                    if (!next) break;
+                    if (["H1", "H2", "H3"].includes(next.tagName)) break;
+                    if (next.tagName === "HR" && next.nextElementSibling && ["H1", "H2", "H3"].includes(next.nextElementSibling.tagName)) {
+                        break;
+                    }
+                    curr = next;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

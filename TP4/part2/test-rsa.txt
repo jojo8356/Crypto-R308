@@ -1,0 +1,183 @@
+# -*- coding: utf-8 -*-
+"""R3.09 - Chiffrement RSA : script de test.
+
+  python3 test-rsa.py     (dans le repertoire contenant rsa.py)
+
+Les fonctions aleatoires (random_prime, random_key) ne sont pas comparees a
+une valeur fixe : on verifie les PROPRIETES de ce qu'elles renvoient.
+"""
+import os
+import random
+import threading
+import sys
+
+if not os.path.exists("rsa.py"):
+    print("ERREUR : rsa.py est absent de ce repertoire (%s)." % os.getcwd())
+    sys.exit(1)
+try:
+    import rsa as M
+except ImportError as e:
+    print("ERREUR a l'import de rsa.py : %s" % e)
+    if e.name and e.name != "rsa":
+        print("         Le module manquant est '%s'." % e.name)
+        print("         rsa.py doit contenir lui-meme les fonctions du TP precedent, ou le fichier %s.py doit etre a cote." % e.name)
+    sys.exit(1)
+except Exception as e:
+    print("ERREUR : rsa.py plante des son chargement : %s: %s" % (type(e).__name__, e))
+    sys.exit(1)
+
+ETAT = {}
+
+
+def _note(q, ok):
+    ETAT[q] = ok if ETAT.get(q) is None else (ETAT[q] and ok)
+
+
+def absente(q, nom):
+    if not hasattr(M, nom):
+        print("  [ A FAIRE ] %s n'est pas encore definie" % nom)
+        ETAT.setdefault(q, None)
+        return True
+    return False
+
+
+def verifie(q, intitule, obtenu, attendu):
+    ok = (obtenu == attendu)
+    print("  [%s] %s" % ("  OK   " if ok else " ECHEC ", intitule))
+    if not ok:
+        print("            attendu : %r" % (attendu,))
+        print("            obtenu  : %r" % (obtenu,))
+    _note(q, ok)
+
+
+def chrono(q, intitule, fonction, secondes=20):
+    """Execute fonction() dans un thread avec une limite de temps (portable Windows/Linux/macOS).
+    Renvoie le resultat, ou None en cas de depassement ou d'exception."""
+    boite = {}
+
+    def cible():
+        try:
+            boite['r'] = fonction()
+        except Exception as e:
+            boite['e'] = e
+    t = threading.Thread(target=cible, daemon=True)
+    t.start()
+    t.join(secondes)
+    if t.is_alive():
+        print("  [ ECHEC ] %s : plus de %d s (algorithme trop lent ? boucle infinie ?)" % (intitule, secondes))
+        _note(q, False)
+        return None
+    if 'e' in boite:
+        e = boite['e']
+        print("  [ ECHEC ] %s a leve : %s: %s" % (intitule, type(e).__name__, e))
+        _note(q, False)
+        return None
+    return boite.get('r')
+
+
+def est_premier(n):
+    """Miller-Rabin deterministe pour n < 3.3e24 (bases fixes) : juge de paix independant du code teste."""
+    if n < 2:
+        return False
+    for p in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41):
+        if n % p == 0:
+            return n == p
+    d, s = n - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        s += 1
+    for a in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41):
+        x = pow(a, d, n)
+        if x in (1, n - 1):
+            continue
+        for _ in range(s - 1):
+            x = x * x % n
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+
+# cle fixe (N = 16) pour tester chiffrement/dechiffrement independamment de random_key
+E0, D0, N0 = 349541711, 1794943655, 3384433201
+
+print("=" * 62)
+print(" R3.09 - Chiffrement RSA")
+print("=" * 62)
+random.seed(2026)
+
+print("\n--- 1.a random_prime ---")
+if not absente(1, 'random_prime'):
+    for N in (5, 16, 64):
+        ps = chrono(1, "random_prime(%d)" % N, lambda: [M.random_prime(N) for _ in range(5)])
+        if ps is None:
+            continue
+        verifie(1, "N=%d : 5 tirages dans [2^%d, 2^%d[" % (N, N - 1, N), all(2 ** (N - 1) <= p < 2 ** N for p in ps), True)
+        verifie(1, "N=%d : les 5 sont premiers (verification independante)" % N, all(est_premier(p) for p in ps), True)
+    ps = chrono(1, "random_prime(5)", lambda: {M.random_prime(5) for _ in range(40)})
+    if ps is not None:
+        verifie(1, "N=5 : plusieurs valeurs distinctes sur 40 tirages (c'est bien aleatoire)", len(ps) > 1, True)
+
+print("\n--- 1.b random_key ---")
+if not absente(2, 'random_key'):
+    for N in (10, 64):
+        k = chrono(2, "random_key(%d)" % N, lambda: M.random_key(N), 60)
+        if k is None:
+            continue
+        if not (isinstance(k, tuple) and len(k) == 3):
+            print("  [ ECHEC ] random_key doit renvoyer un triplet (e, d, n)")
+            _note(2, False)
+            continue
+        e, d, n = k
+        verifie(2, "N=%d : n a 2N-1 ou 2N bits" % N, n.bit_length() in (2 * N - 1, 2 * N), True)
+        verifie(2, "N=%d : e >= 65537" % N, e >= 65537, True)
+        verifie(2, "N=%d : d > n^(1/4)/3" % N, d ** 4 * 81 > n, True)
+        ok = all(pow(pow(m, e, n), d, n) == m for m in (2, 3, 12345 % n, n - 1))
+        verifie(2, "N=%d : (m^e)^d = m modulo n pour quelques m" % N, ok, True)
+
+print("\n--- 2.a string2tab ---")
+if not absente(3, 'string2tab'):
+    verifie(3, "exemple du sujet : Hello, N=3", chrono(3, "string2tab", lambda: M.string2tab("Hello", 3)),
+            [4, 8, 6, 5, 6, 12, 6, 12, 6, 15, 8])
+    verifie(3, "chaine vide, N=5 : un seul bloc, le bourrage 10000000", chrono(3, "string2tab", lambda: M.string2tab("", 5)), [128])
+    t = chrono(3, "string2tab", lambda: M.string2tab("Bonjour ! ça va ?", 5))
+    if t is not None:
+        verifie(3, "N=5 : tous les blocs tiennent sur 8 bits", all(0 <= x < 256 for x in t), True)
+        verifie(3, "N=5 : le ç (2 octets en UTF-8) donne 18 octets + 1 bloc de bourrage", len(t), 19)
+
+print("\n--- 2.b tab2string ---")
+if not absente(4, 'tab2string'):
+    verifie(4, "exemple du sujet a l'envers", chrono(4, "tab2string", lambda: M.tab2string([4, 8, 6, 5, 6, 12, 6, 12, 6, 15, 8], 3)), "Hello")
+    if hasattr(M, 'string2tab'):
+        for texte, N in [("Bonjour ! ça va ?", 5), ("Été à Nice : 100 % réussi !", 7), ("a", 3)]:
+            r = chrono(4, "tab2string", lambda: M.tab2string(M.string2tab(texte, N), N))
+            verifie(4, "aller-retour de %r avec N=%d" % (texte, N), r, texte)
+
+print("\n--- 3 et 4 : chiffrement_rsa / dechiffrement_rsa ---")
+if not absente(5, 'chiffrement_rsa') and not absente(5, 'dechiffrement_rsa'):
+    msg = "Ils ne nous auront pas cette fois."
+    c = chrono(5, "chiffrement_rsa", lambda: M.chiffrement_rsa(msg, D0, N0))
+    if c is not None:
+        verifie(5, "cle fixe : tous les entiers chiffres sont < n", all(0 <= x < N0 for x in c), True)
+        verifie(5, "cle fixe : le chiffre n'est pas le clair", c != M.string2tab(msg, 16) if hasattr(M, 'string2tab') else True, True)
+        verifie(5, "cle fixe : dechiffrement_rsa(chiffrement_rsa(m)) = m", chrono(5, "dechiffrement_rsa", lambda: M.dechiffrement_rsa(c, E0, N0)), msg)
+    if hasattr(M, 'random_key'):
+        k = chrono(5, "random_key(64)", lambda: M.random_key(64), 60)
+        if k is not None:
+            e, d, n = k
+            long_msg = "The computing world has undergone a revolution since 1978. Ça va ? Été !"
+            r = chrono(5, "aller-retour 128 bits", lambda: M.dechiffrement_rsa(M.chiffrement_rsa(long_msg, d, n), e, n))
+            verifie(5, "cle aleatoire de 128 bits : aller-retour d'un message avec accents", r, long_msg)
+
+print("\n" + "=" * 62)
+libelles = {1: "random_prime", 2: "random_key", 3: "string2tab", 4: "tab2string", 5: "chiffrement RSA"}
+for q in sorted(libelles):
+    etat = ETAT.get(q)
+    mot = "validee" if etat is True else ("a corriger" if etat is False else "non commencee")
+    print("  Question %d (%-16s) : %s" % (q, libelles[q], mot))
+faites = sum(1 for q in libelles if ETAT.get(q) is True)
+print("\n  %d question(s) validee(s) sur %d." % (faites, len(libelles)))
+if faites == len(libelles):
+    print("  Tout est bon, vous pouvez deposer votre fichier.")
+print("=" * 62)
